@@ -729,6 +729,32 @@
       },
     };
 
+    const DANCE_URL_ALIASES = {
+      congo: 'congo_de_captieux',
+      'la-fiesta': 'san_benito',
+    };
+    const DANCE_ID_TO_URL = {
+      congo_de_captieux: 'congo',
+      san_benito: 'la-fiesta',
+    };
+
+    function danceFromUrl() {
+      const params = new URLSearchParams(location.search);
+      for (const key of params.keys()) {
+        const id = DANCE_URL_ALIASES[key];
+        if (id && DANCES[id]) return DANCES[id];
+      }
+      return DANCES.san_benito;
+    }
+
+    function syncDanceUrl(dance) {
+      const alias = DANCE_ID_TO_URL[dance.id];
+      if (!alias) return;
+      const url = new URL(location.href);
+      url.search = '?' + alias;
+      history.replaceState(null, '', url);
+    }
+
     // ——— engine ———
 
     let currentDance = DANCES.san_benito;
@@ -1095,7 +1121,9 @@
     });
 
     danceSelect.addEventListener('change', () => {
-      applyDance(DANCES[danceSelect.value]);
+      const dance = DANCES[danceSelect.value];
+      applyDance(dance);
+      syncDanceUrl(dance);
     });
 
     toggleLabels.addEventListener('change', () => {
@@ -1127,7 +1155,10 @@
       }
     });
 
-    applyDance(DANCES.san_benito);
+    const initialDance = danceFromUrl();
+    danceSelect.value = initialDance.id;
+    applyDance(initialDance);
+    syncDanceUrl(initialDance);
     requestAnimationFrame(frame);
   </script>
 </body>
