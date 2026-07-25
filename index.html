@@ -864,13 +864,25 @@
       }
 
       const max = maxHoldFrame(dance);
-      const from = holdFrame;
-      const to = (from + delta + (max + 1)) % (max + 1);
+      let from = holdFrame;
+      let to = (from + delta + (max + 1)) % (max + 1);
 
-      // Skip tween only if EVERY dancer is already at the destination pose
-      // (true duplicate frames). Never use this for loop wrap when poses differ.
-      const samePose = framesPoseEqual(dance, from, to);
-      if (samePose) {
+      // Skip tween if poses already match (true duplicate frames).
+      if (framesPoseEqual(dance, from, to)) {
+        holdFrame = to;
+        running = false;
+        syncPlayPauseButton();
+        return;
+      }
+
+      // No wrap segment: don't lerp backward across the cycle. Forward wrap
+      // snaps to start and continues into the next step so label "1"→"1"→"2"
+      // does not consume an extra click; backward wrap snaps only.
+      const wrapBeats = getWrapBeats(dance);
+      if (wrapBeats === 0 && delta > 0 && from === max && to === 0) {
+        from = 0;
+        to = 1;
+      } else if (wrapBeats === 0 && delta < 0 && from === 0 && to === max) {
         holdFrame = to;
         running = false;
         syncPlayPauseButton();
