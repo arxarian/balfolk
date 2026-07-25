@@ -152,8 +152,7 @@
 <body>
   <div class="wrap">
     <div class="panel note" id="danceNote">
-      <a href="{{url_for('guest_views.dashboard')}}">Zpět na dashboard Pípovo stránek</a>
-      <div id="danceNoteBody" style="margin-top: 8px;"></div>
+      <div id="danceNoteBody"></div>
     </div>
 
     <div class="panel controls">
@@ -686,14 +685,14 @@
         toCanvas: sanBenitoToCanvas,
         drawBackdrop: sanBenitoBackdrop,
         backdropName: 'Obrys kruhu',
-        showStepControls: false,
+        showStepControls: true,
         guideLabelsFromZero: false,
         hideClosingGuidePoint: false,
         noteHtml:
           'Vizualizace tance Porthogese tak, jak nás jej učil Gianmarco. Originální hudbu sice neznáme, ' +
           'ale italská balfolková komunita našla tuto píseň a zjistila, že na tanec sedí perfektně: ' +
           'La fiesta de San Benito (<a href="https://youtu.be/wmtiT42PiAk?si=uNRYBLQwFSke3XO5" target="_blank" rel="noopener">hudba na youtube</a>). ' +
-          'Vytvořeno zcela pomocí ChatGPT, doupravil Josef Lát v červenci 2026.',
+          '<br/>Vytvořeno zcela pomocí ChatGPT, doupravil Josef Lát v červenci 2026.',
       },
       congo_de_captieux: {
         id: 'congo_de_captieux',
@@ -725,7 +724,7 @@
           'podle popisu a diagramů na ' +
           '<a href="https://ballifolk.altervista.org/congo_de_captieux.html" target="_blank" rel="noopener">ballifolk.altervista.org</a>. ' +
           'Modrá = leadeři (LN/LS), červená = followeři (FN/FS). Pohyb převážně po stranách a úhlopříčkách čtverce. ' +
-          'Vytvořeno zcela pomocí Grok 4.5, doupravil Pavel Hübner v červenci 2026.',
+          '<br/>Vytvořeno zcela pomocí Grok 4.5, doupravil Pavel Hübner v červenci 2026.',
       },
     };
 
