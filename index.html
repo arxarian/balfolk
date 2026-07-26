@@ -1460,12 +1460,16 @@
       let wrap = getWrapBeats(dance) > 0 ? 1 : 0;
 
       if (dance.id === 'bourree_6') {
+        // Trails use the full phrase span including the boundary beat (0–16, 16–32,
+        // 32–48) so the first segment from 0/16 → 1 is drawn after a phrase ends.
+        // Čísla dob still skip the duplicate boundary via beatInBourreeOverlayWindow.
         const range = bourreeOverlayRange(overlayAbsoluteBeat(dance, state));
         wrap = 0;
         fromIdx = -1;
         toIdx = -1;
         for (let i = 0; i < timeline.length; i++) {
-          if (!beatInBourreeOverlayWindow(timeline[i].beat, range)) continue;
+          const beat = timeline[i].beat;
+          if (beat < range.startBeat || beat > range.endBeat) continue;
           if (fromIdx < 0) fromIdx = i;
           toIdx = i;
         }
