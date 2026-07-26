@@ -147,6 +147,43 @@
       font-size: 14px;
       min-height: 1.2em;
     }
+
+    .dancer-picker {
+      display: none;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .dancer-picker.is-visible {
+      display: flex;
+    }
+
+    .dancer-picker-label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-right: 2px;
+    }
+
+    .dancer-picker button {
+      min-width: 2.4em;
+      padding: 6px 8px;
+      font-size: 12px;
+      font-weight: 600;
+      border-color: var(--dancer-color, var(--line));
+      color: var(--dancer-color, var(--text));
+    }
+
+    .dancer-picker button.is-selected {
+      background: var(--dancer-color, var(--line));
+      color: #fff;
+      border-color: var(--dancer-color, var(--line));
+    }
+
+    .dancer-picker button.is-selected:hover {
+      background: var(--dancer-color, var(--line));
+      filter: brightness(0.95);
+    }
   </style>
 </head>
 <body>
@@ -165,6 +202,9 @@
         <label><input type="checkbox" id="toggleTrails" checked> Trajektorie</label>
         <label><input type="checkbox" id="toggleGuidePoints" checked> Průchozí body</label>
         <label><input type="checkbox" id="toggleLabels"> Čísla dob</label>
+        <div class="dancer-picker" id="dancerPicker" aria-label="Výběr tanečníka">
+          <span class="dancer-picker-label">Tanečník</span>
+        </div>
       </div>
       <div class="right-controls">
         <div class="playback" id="playbackControls">
@@ -207,6 +247,7 @@
     const btnStepBack = document.getElementById('btnStepBack');
     const btnStepFwd = document.getElementById('btnStepFwd');
     const btnSpeed = document.getElementById('btnSpeed');
+    const dancerPicker = document.getElementById('dancerPicker');
 
     const SPEED_STEPS = [1, 0.5, 0.25];
     const SPEED_LABELS = ['1×', '½×', '¼×'];
@@ -530,6 +571,54 @@
       const beat = state.beatFloat != null ? state.beatFloat : 0;
       const hit = dance.sections.find(s => beat >= s.fromBeat && beat < s.toBeat);
       return hit ? hit.label : '';
+    }
+
+    function overlayAbsoluteBeat(dance, state) {
+      const beat = sectionStateFor(dance, state).beatFloat;
+      return beat != null ? beat : 0;
+    }
+
+    /** Phrase window start (0, 16, 32). At exact 16/32 stay in previous window. */
+    function bourreeWindowStart(beatFloat) {
+      let b = ((beatFloat % BOURREE_CYCLE_END) + BOURREE_CYCLE_END) % BOURREE_CYCLE_END;
+      if (b > 0 && b % BOURREE_PHRASE === 0) b -= 1e-9;
+      return Math.floor(b / BOURREE_PHRASE) * BOURREE_PHRASE;
+    }
+
+    /** Absolute beat range for Trajektorie / Čísla dob: 0–16, 17–32, 33–48. */
+    function bourreeOverlayRange(beatFloat) {
+      const startBeat = bourreeWindowStart(beatFloat);
+      return { startBeat, endBeat: startBeat + BOURREE_PHRASE };
+    }
+
+    function beatInBourreeOverlayWindow(beat, range) {
+      if (range.startBeat === 0) return beat >= 0 && beat <= range.endBeat;
+      return beat > range.startBeat && beat <= range.endBeat;
+    }
+
+    function dancersForOverlays(dance) {
+      if (dance.id !== 'bourree_6' || !selectedDancerId) return dance.dancers;
+      return dance.dancers.filter((d) => d.id === selectedDancerId);
+    }
+
+    /** True when another Bourrée dancer is selected — this one should draw faded. */
+    function dancerIsDimmed(dancer) {
+      return !!(selectedDancerId && dancer.id && dancer.id !== selectedDancerId);
+    }
+
+    function syncDancerPicker(dance) {
+      const isBourree = dance.id === 'bourree_6';
+      dancerPicker.classList.toggle('is-visible', isBourree);
+      if (!isBourree) {
+        selectedDancerId = null;
+        dancerPicker.querySelectorAll('button[data-role]').forEach((btn) => {
+          btn.classList.remove('is-selected');
+        });
+      } else {
+        dancerPicker.querySelectorAll('button[data-role]').forEach((btn) => {
+          btn.classList.toggle('is-selected', btn.dataset.role === selectedDancerId);
+        });
+      }
     }
 
     // ——— San Benito (polar circle) ———
@@ -1115,6 +1204,8 @@
     let holdFrame = null;
     // One-shot tween between timeline frames (next/back buttons).
     let stepTween = null;
+    /** Bourrée role id (BL/BC/…) or null when showing overlays for all dancers. */
+    let selectedDancerId = null;
 
     function maxHoldFrame(dance) {
       return getTimeline(dance).length - 1;
@@ -1281,14 +1372,21 @@
         dance.badgeTotal != null ? dance.badgeTotal : getCycleBeats(dance)
       );
       playbackControls.classList.toggle('is-visible', !!dance.showStepControls);
+      selectedDancerId = null;
+      syncDancerPicker(dance);
       resetClock();
     }
 
-    function drawGuidePoints(dance) {
+    function drawGuidePoints(dance, state) {
       const timeline = getTimeline(dance);
       const lastIdx = timeline.length - 1;
       const hideLast = dance.hideClosingGuidePoint && framesPoseEqual(dance, 0, lastIdx);
       const labelCandidates = [];
+      const labelDancers = dancersForOverlays(dance);
+      const labelDancerSet = new Set(labelDancers);
+      const bourreeRange = dance.id === 'bourree_6'
+        ? bourreeOverlayRange(overlayAbsoluteBeat(dance, state))
+        : null;
 
       dance.dancers.forEach((dancer) => {
         const pts = dancer.pattern.map(p => dance.toCanvas(dancer, p));
@@ -1297,15 +1395,15 @@
 
           ctx.save();
           ctx.fillStyle = dancer.color;
-          ctx.globalAlpha = 0.30;
+          ctx.globalAlpha = dancerIsDimmed(dancer) ? 0.10 : 0.30;
           ctx.beginPath();
           ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
           ctx.fill();
           ctx.restore();
 
-          if (toggleLabels.checked) {
-            labelCandidates.push({ id: String(timeline[idx].id), x: p.x, y: p.y });
-          }
+          if (!toggleLabels.checked || !labelDancerSet.has(dancer)) return;
+          if (bourreeRange && !beatInBourreeOverlayWindow(timeline[idx].beat, bourreeRange)) return;
+          labelCandidates.push({ id: String(timeline[idx].id), x: p.x, y: p.y });
         });
       });
 
@@ -1354,13 +1452,31 @@
       ctx.restore();
     }
 
-    function drawTrails(dance) {
+    function drawTrails(dance, state) {
       const timeline = getTimeline(dance);
-      const wrap = getWrapBeats(dance) > 0 ? 1 : 0;
-      const steps = (timeline.length - 1) + wrap;
+      const dancers = dancersForOverlays(dance);
+      let fromIdx = 0;
+      let toIdx = timeline.length - 1;
+      let wrap = getWrapBeats(dance) > 0 ? 1 : 0;
+
+      if (dance.id === 'bourree_6') {
+        const range = bourreeOverlayRange(overlayAbsoluteBeat(dance, state));
+        wrap = 0;
+        fromIdx = -1;
+        toIdx = -1;
+        for (let i = 0; i < timeline.length; i++) {
+          if (!beatInBourreeOverlayWindow(timeline[i].beat, range)) continue;
+          if (fromIdx < 0) fromIdx = i;
+          toIdx = i;
+        }
+        if (fromIdx < 0) return;
+      }
+
+      const steps = (toIdx - fromIdx) + wrap;
+      if (steps <= 0) return;
       const sampleCount = Math.max(80, steps * 20);
 
-      dance.dancers.forEach((dancer) => {
+      dancers.forEach((dancer) => {
         ctx.save();
         ctx.strokeStyle = dancer.color;
         ctx.globalAlpha = 0.22;
@@ -1372,8 +1488,8 @@
           const total = u * steps;
           const seg = Math.min(steps - 1, Math.floor(total));
           const phase = total - seg;
-          const dest = (seg === timeline.length - 1 && wrap) ? 0 : seg + 1;
-          const from = Math.min(seg, timeline.length - 1);
+          const from = fromIdx + Math.min(seg, toIdx - fromIdx);
+          const dest = (from === toIdx && wrap) ? fromIdx : Math.min(from + 1, toIdx);
           const p = patternPointAt(dancer.pattern, from, phase, dest);
           const c = dance.toCanvas(dancer, p);
           if (s === 0) ctx.moveTo(c.x, c.y);
@@ -1408,8 +1524,10 @@
       dance.dancers.forEach((dancer) => {
         const p = dancerPoint(dancer, state);
         const c = dance.toCanvas(dancer, p);
+        const dimmed = dancerIsDimmed(dancer);
 
         ctx.save();
+        ctx.globalAlpha = dimmed ? 0.28 : 1;
         ctx.fillStyle = dancer.color;
         ctx.beginPath();
         ctx.arc(c.x, c.y, dotRadius, 0, Math.PI * 2);
@@ -1434,8 +1552,8 @@
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       if (toggleBackdrop.checked) dance.drawBackdrop();
-      if (toggleTrails.checked) drawTrails(dance);
-      if (toggleGuidePoints.checked) drawGuidePoints(dance);
+      if (toggleTrails.checked) drawTrails(dance, state);
+      if (toggleGuidePoints.checked) drawGuidePoints(dance, state);
       drawDancers(dance, state);
 
       beatInCycleEl.textContent = String(positionLabel(dance, state));
@@ -1487,6 +1605,20 @@
       opt.value = dance.id;
       opt.textContent = dance.title;
       danceSelect.appendChild(opt);
+    });
+
+    bourreeDancers.forEach((dancer) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.dataset.role = dancer.id;
+      btn.textContent = dancer.label;
+      btn.title = 'Vybrat tanečníka ' + dancer.label;
+      btn.style.setProperty('--dancer-color', dancer.color);
+      btn.addEventListener('click', () => {
+        selectedDancerId = selectedDancerId === dancer.id ? null : dancer.id;
+        syncDancerPicker(currentDance);
+      });
+      dancerPicker.appendChild(btn);
     });
 
     danceSelect.addEventListener('change', () => {
