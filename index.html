@@ -596,29 +596,49 @@
       return beat > range.startBeat && beat <= range.endBeat;
     }
 
+    function danceHasDancerPicker(dance) {
+      return dance.id === 'bourree_6' || dance.id === 'congo_de_captieux';
+    }
+
     function dancersForOverlays(dance) {
-      if (dance.id !== 'bourree_6' || !selectedDancerId) return dance.dancers;
+      if (!danceHasDancerPicker(dance) || !selectedDancerId) return dance.dancers;
       return dance.dancers.filter((d) => d.id === selectedDancerId);
     }
 
-    /** True when another Bourrée dancer is selected — this one should draw faded. */
+    /** True when another selectable dancer is selected — this one should draw faded. */
     function dancerIsDimmed(dancer) {
       return !!(selectedDancerId && dancer.id && dancer.id !== selectedDancerId);
     }
 
+    function rebuildDancerPickerButtons(dance) {
+      dancerPicker.querySelectorAll('button[data-role]').forEach((btn) => btn.remove());
+      dance.dancers
+        .filter((dancer) => dancer.id)
+        .forEach((dancer) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.dataset.role = dancer.id;
+          btn.textContent = dancer.label;
+          btn.title = 'Vybrat tanečníka ' + dancer.label;
+          btn.style.setProperty('--dancer-color', dancer.color);
+          btn.classList.toggle('is-selected', dancer.id === selectedDancerId);
+          btn.addEventListener('click', () => {
+            selectedDancerId = selectedDancerId === dancer.id ? null : dancer.id;
+            syncDancerPicker(currentDance);
+          });
+          dancerPicker.appendChild(btn);
+        });
+    }
+
     function syncDancerPicker(dance) {
-      const isBourree = dance.id === 'bourree_6';
-      dancerPicker.classList.toggle('is-visible', isBourree);
-      if (!isBourree) {
+      const show = danceHasDancerPicker(dance);
+      dancerPicker.classList.toggle('is-visible', show);
+      if (!show) {
         selectedDancerId = null;
-        dancerPicker.querySelectorAll('button[data-role]').forEach((btn) => {
-          btn.classList.remove('is-selected');
-        });
-      } else {
-        dancerPicker.querySelectorAll('button[data-role]').forEach((btn) => {
-          btn.classList.toggle('is-selected', btn.dataset.role === selectedDancerId);
-        });
+        dancerPicker.querySelectorAll('button[data-role]').forEach((btn) => btn.remove());
+        return;
       }
+      rebuildDancerPickerButtons(dance);
     }
 
     // ——— San Benito (polar circle) ———
@@ -1204,7 +1224,7 @@
     let holdFrame = null;
     // One-shot tween between timeline frames (next/back buttons).
     let stepTween = null;
-    /** Bourrée role id (BL/BC/…) or null when showing overlays for all dancers. */
+    /** Role id (e.g. BL, LN) or null when showing overlays for all dancers. */
     let selectedDancerId = null;
 
     function maxHoldFrame(dance) {
@@ -1609,20 +1629,6 @@
       opt.value = dance.id;
       opt.textContent = dance.title;
       danceSelect.appendChild(opt);
-    });
-
-    bourreeDancers.forEach((dancer) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.dataset.role = dancer.id;
-      btn.textContent = dancer.label;
-      btn.title = 'Vybrat tanečníka ' + dancer.label;
-      btn.style.setProperty('--dancer-color', dancer.color);
-      btn.addEventListener('click', () => {
-        selectedDancerId = selectedDancerId === dancer.id ? null : dancer.id;
-        syncDancerPicker(currentDance);
-      });
-      dancerPicker.appendChild(btn);
     });
 
     danceSelect.addEventListener('change', () => {
