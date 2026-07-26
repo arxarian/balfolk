@@ -755,6 +755,240 @@
       { id: 'FS', color: '#dc2626', label: 'FS', pattern: congoPatternFor('FS') },
     ];
 
+    // ——— Bourrée (6) — rectangle, 2×3 ———
+    // Dance coords: x right, y up. Outer corners at (±BW, ±BH).
+    // Part 1: shared zig-zag — bases on two facing rows, dips on dual mid-lines,
+    // vertical row swap at the ends. (All six, phase-offset.)
+    // Part 2: middles on cross; corners on dual-lane perimeter (outer CCW / inner CW).
+
+    const BW = 2.5;
+    const BH = 2.0;
+    /** Parallel mid-lanes so bottom/top dips do not share the same spots. */
+    const BMID = 0.35;
+    /** Four x positions on each mid-line. */
+    const BOURREE_MX = [-BW, -BW * 0.4, BW *0.4, BW];
+    const bourreeUnit = 115;
+    const BOURREE_ROLES = ['BL', 'BC', 'BR', 'TR', 'TC', 'TL'];
+    // Phrase = Part1 (8) + Part2 (8) = 16. UI always shows x/16.
+    // Absolute cycle = 3 phrases (48) so BL returns home with no teleport.
+    const BOURREE_PART1_END = 8;
+    const BOURREE_PART2_LEN = 8;
+    const BOURREE_PHRASE = BOURREE_PART1_END + BOURREE_PART2_LEN; // 16
+    const BOURREE_PHRASE_COUNT = 3;
+    const BOURREE_CYCLE_END = BOURREE_PHRASE * BOURREE_PHRASE_COUNT; // 48
+    /** Circuit indices that are middle-column bases (Part 2 = cross). */
+    const BOURREE_MIDDLE_INDEX = { 2: true, 8: true }; // BC, TC
+    /** Circuit indices that are rectangle corners (Part 2 = perimeter). */
+    const BOURREE_CORNER_INDEX = { 0: true, 4: true, 6: true, 10: true }; // BL, BR, TR, TL
+    /** Corner ring slots CCW: 0 BR → 1 TR → 2 TL → 3 BL. */
+    const BOURREE_CORNER_RING = [4, 6, 10, 0];
+    const BOURREE_CORNER_SLOT = { 4: 0, 6: 1, 10: 2, 0: 3 };
+    /** Outer lane = BR/TL (CCW); inner lane = TR/BL (CW). */
+    const BOURREE_CORNER_OUTER = { 4: true, 10: true };
+    /** Equal distance from rectangle edge for outer and inner lane mids. */
+    const BOURREE_CORNER_LANE = 0.35;
+
+    function bourreeToCanvas(_dancer, p) {
+      return {
+        x: center.x + p[0] * bourreeUnit,
+        y: center.y - p[1] * bourreeUnit,
+      };
+    }
+
+    function bourreeBackdrop() {
+      const left = center.x - BW * bourreeUnit;
+      const right = center.x + BW * bourreeUnit;
+      const top = center.y - BH * bourreeUnit;
+      const bottom = center.y + BH * bourreeUnit;
+      const midTop = center.y - BMID * bourreeUnit;
+      const midBot = center.y + BMID * bourreeUnit;
+
+      ctx.save();
+      ctx.strokeStyle = '#c7cdd8';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(left, top, right - left, bottom - top);
+
+      ctx.setLineDash([5, 5]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(left, midTop);
+      ctx.lineTo(right, midTop);
+      ctx.moveTo(left, midBot);
+      ctx.lineTo(right, midBot);
+      ctx.moveTo(center.x, top);
+      ctx.lineTo(center.x, bottom);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Marks at the 4+4 equidistant mid-line wait points.
+      ctx.fillStyle = '#c7cdd8';
+      for (let i = 0; i < BOURREE_MX.length; i++) {
+        const x = center.x + BOURREE_MX[i] * bourreeUnit;
+        ctx.beginPath();
+        ctx.arc(x, midTop, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(x, midBot, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Path stops (12). Part 1 only walks 8 beats along this path.
+    // 0 BL → 1 L1 → 2 BC → 3 L2 → 4 BR → 5 U3 → 6 TR → 7 U2 → 8 TC → 9 U1 → 10 TL → 11 L0
+    const bourreeCircuit = [
+      [-BW, -BH],                 // 0 BL
+      [BOURREE_MX[1], -BMID],     // 1 L1
+      [0, -BH],                   // 2 BC
+      [BOURREE_MX[2], -BMID],     // 3 L2
+      [BW, -BH],                  // 4 BR
+      [BOURREE_MX[3], BMID],      // 5 U3 (right-edge mid)
+      [BW, BH],                   // 6 TR
+      [BOURREE_MX[2], BMID],      // 7 U2
+      [0, BH],                    // 8 TC
+      [BOURREE_MX[1], BMID],      // 9 U1
+      [-BW, BH],                  // 10 TL
+      [BOURREE_MX[0], -BMID],     // 11 L0 (left-edge mid)
+    ];
+
+    // Home-slot offsets on the circuit (BL starts bottom left).
+    const bourreeCircuitOffset = {
+      BL: 0, BC: 2, BR: 4, TR: 6, TC: 8, TL: 10,
+    };
+
+    function bourreeCircuitPosFrom(startIndex, step) {
+      const n = bourreeCircuit.length;
+      const p = bourreeCircuit[((startIndex + step) % n + n) % n];
+      return p.slice();
+    }
+
+    function bourreeCircuitPos(role, step) {
+      return bourreeCircuitPosFrom(bourreeCircuitOffset[role], step);
+    }
+
+    // Part 2 cross keyed by which middle Part 1 ended on (TC north / BC south).
+    function bourreeCrossPos(middleIndex, local) {
+      const fromNorth = middleIndex === 8;
+      const eps = 0.18;
+      const pts = fromNorth
+        ? [
+            [0, BH],
+            [-eps, 0],
+            [-BW, 0],
+			[0, -BMID],
+            [0, -BH],
+            [eps, 0],
+            [BW, 0],
+            [0, BMID],
+            [0, BH],
+          ]
+        : [
+            [0, -BH],
+            [eps, 0],
+            [BW, 0],
+            [0, BMID],
+            [0, BH],
+            [-eps, 0],
+            [-BW, 0],
+            [0, -BMID],
+            [0, -BH],
+          ];
+      const i = Math.max(0, Math.min(Math.floor(local + 1e-9), pts.length - 1));
+      return pts[i].slice();
+    }
+
+    /** Edge mid between ring slots i and i+1 (CCW). Same |offset| outside and inside the edge. */
+    function bourreeCornerEdgeMid(edgeSlot, outer) {
+      const d = BOURREE_CORNER_LANE;
+      // 0 right, 1 top, 2 left, 3 bottom
+      if (edgeSlot === 0) return outer ? [BW + d, 0] : [BW - d, 0];
+      if (edgeSlot === 1) return outer ? [0, BH + d] : [0, BH - d];
+      if (edgeSlot === 2) return outer ? [-BW - d, 0] : [-BW + d, 0];
+      return outer ? [0, -BH - d] : [0, -BH + d];
+    }
+
+    /**
+     * Part 2 corner perimeter: local 0 and 8 = start corner.
+     * BR/TL → outer anticlockwise; BL/TR → inner clockwise.
+     */
+    function bourreeCornerPos(startCornerIndex, local) {
+      const startSlot = BOURREE_CORNER_SLOT[startCornerIndex];
+      if (startSlot == null) {
+        return bourreeCircuit[startCornerIndex].slice();
+      }
+      const outer = Object.prototype.hasOwnProperty.call(BOURREE_CORNER_OUTER, startCornerIndex);
+      const step = Math.max(0, Math.min(Math.floor(local + 1e-9), 8));
+      // Even steps = corners; odd = edge mids.
+      if (step % 2 === 0) {
+        const cornerSteps = step / 2; // 0..4
+        const slot = outer
+          ? (startSlot + cornerSteps) % 4
+          : (startSlot - cornerSteps + 4 * 4) % 4;
+        return bourreeCircuit[BOURREE_CORNER_RING[slot]].slice();
+      }
+      const midSteps = (step - 1) / 2; // 0..3
+      const edgeSlot = outer
+        ? (startSlot + midSteps) % 4
+        : (startSlot - 1 - midSteps + 4 * 4) % 4;
+      return bourreeCornerEdgeMid(edgeSlot, outer);
+    }
+
+    function bourreePosAt(role, beat) {
+      const b = Math.round(beat);
+      // Closing frame of the seamless cycle = home start.
+      if (b >= BOURREE_CYCLE_END) {
+        return bourreeCircuitPos(role, 0);
+      }
+      const home = bourreeCircuitOffset[role];
+      const phrase = Math.floor(b / BOURREE_PHRASE); // 0, 1, 2
+      const local = b % BOURREE_PHRASE; // 0..15 within phrase
+      // Each completed Part 1 advances 8 circuit steps; Part 2 does not.
+      const circuitStart = (home + phrase * BOURREE_PART1_END) % bourreeCircuit.length;
+      const part1EndIndex = (circuitStart + BOURREE_PART1_END) % bourreeCircuit.length;
+
+      // Part 1: continue the circuit from wherever the previous Part 2 ended.
+      if (local <= BOURREE_PART1_END) {
+        return bourreeCircuitPosFrom(circuitStart, local);
+      }
+
+      // Part 2: cross on middles; dual-lane perimeter on corners.
+      const part2Local = local - BOURREE_PART1_END;
+      if (Object.prototype.hasOwnProperty.call(BOURREE_MIDDLE_INDEX, part1EndIndex)) {
+        return bourreeCrossPos(part1EndIndex, part2Local);
+      }
+      if (Object.prototype.hasOwnProperty.call(BOURREE_CORNER_INDEX, part1EndIndex)) {
+        return bourreeCornerPos(part1EndIndex, part2Local);
+      }
+      return bourreeCircuitPosFrom(circuitStart, BOURREE_PART1_END);
+    }
+
+    const bourreeFrames = [];
+    for (let beat = 0; beat <= BOURREE_CYCLE_END; beat++) {
+      // Guide / badge labels: phrase-local 0…16 (home=0, first mid=1; never absolute 17…48).
+      const frame = {
+        id: String(beat > 0 && beat % BOURREE_PHRASE === 0 ? BOURREE_PHRASE : beat % BOURREE_PHRASE),
+        beat,
+      };
+      BOURREE_ROLES.forEach((role) => {
+        frame[role] = bourreePosAt(role, beat);
+      });
+      bourreeFrames.push(frame);
+    }
+
+    function bourreePatternFor(role) {
+      return bourreeFrames.map((frame) => frame[role]);
+    }
+
+    // Bottom row blue, top row red (facing each other).
+    const bourreeDancers = [
+      { id: 'BL', color: '#2563eb', label: 'BL', pattern: bourreePatternFor('BL') },
+      { id: 'BC', color: '#3b82f6', label: 'BC', pattern: bourreePatternFor('BC') },
+      { id: 'BR', color: '#60a5fa', label: 'BR', pattern: bourreePatternFor('BR') },
+      { id: 'TR', color: '#dc2626', label: 'TR', pattern: bourreePatternFor('TR') },
+      { id: 'TC', color: '#ef4444', label: 'TC', pattern: bourreePatternFor('TC') },
+      { id: 'TL', color: '#f87171', label: 'TL', pattern: bourreePatternFor('TL') },
+    ];
+
     // ——— dance registry ———
 
     const DANCES = {
@@ -808,15 +1042,50 @@
           'Modrá = leadeři (LN/LS), červená = followeři (FN/FS). Pohyb převážně po stranách a úhlopříčkách čtverce. ' +
           '<br/>Vytvořeno zcela pomocí Grok 4.5, doupravil Pavel Hübner v červenci 2026.',
       },
+      bourree_6: {
+        id: 'bourree_6',
+        title: 'Bourrée (6)',
+        bpm: 90,
+        stepCount: BOURREE_CYCLE_END,
+        /** Badge always shows phrase-local /16, not absolute cycle length. */
+        badgeTotal: BOURREE_PHRASE,
+        timeline: bourreeFrames,
+        dancers: bourreeDancers,
+        toCanvas: bourreeToCanvas,
+        drawBackdrop: bourreeBackdrop,
+        backdropName: 'Obrys podlahy',
+        showStepControls: true,
+        guideLabelsFromZero: true,
+        hideClosingGuidePoint: true,
+        wrapBeats: 0,
+        baseSpeed: 0.65,
+        sections: [
+          { fromBeat: 0, toBeat: 8, label: 'Část 1 — Obejití' },
+          { fromBeat: 8, toBeat: 16, label: 'Část 2 — Kříž / rohy' },
+          { fromBeat: 16, toBeat: 24, label: 'Část 1 — Obejití' },
+          { fromBeat: 24, toBeat: 32, label: 'Část 2 — Kříž / rohy' },
+          { fromBeat: 32, toBeat: 40, label: 'Část 1 — Obejití' },
+          { fromBeat: 40, toBeat: 48, label: 'Část 2 — Kříž / rohy' },
+        ],
+        noteHtml:
+          'Vizualizace bourrée pro šest tanečníků ve dvou řadách naproti sobě. ' +
+          'Nejdřív společně obcházejí obdélník cikcakem přes střed; pak se ti uprostřed křižují ' +
+          'a rohové obíhají po obvodu (vnější proti směru hodin, vnitřní po směru) — a pokračují zase odtud, kde skončili. ' +
+          'Modrá = spodní řada, červená = horní. ' +
+          '<br/>Vytvořeno zcela pomocí Grok 4.5, doupravil Pavel Hübner v červenci 2026.',
+      },
     };
 
     const DANCE_URL_ALIASES = {
       congo: 'congo_de_captieux',
       'la-fiesta': 'san_benito',
+      bourree: 'bourree_6',
+      'bourree-6': 'bourree_6',
     };
     const DANCE_ID_TO_URL = {
       congo_de_captieux: 'congo',
       san_benito: 'la-fiesta',
+      bourree_6: 'bourree',
     };
 
     function danceFromUrl() {
@@ -1008,7 +1277,9 @@
       document.title = dance.title + ' — Pípovo stránky';
       danceNoteBody.innerHTML = dance.noteHtml;
       backdropLabel.textContent = dance.backdropName;
-      beatTotalEl.textContent = String(getCycleBeats(dance));
+      beatTotalEl.textContent = String(
+        dance.badgeTotal != null ? dance.badgeTotal : getCycleBeats(dance)
+      );
       playbackControls.classList.toggle('is-visible', !!dance.showStepControls);
       resetClock();
     }
